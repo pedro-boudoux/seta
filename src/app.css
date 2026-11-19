@@ -63,6 +63,45 @@ html.locked {
 	overflow: hidden;
 }
 
+/* cascading reshuffle when the column count changes — cells dip and
+   return in a left-to-right wave staggered by their column index */
+@keyframes cell-cascade {
+	0% {
+		transform: none;
+		opacity: 1;
+	}
+	35% {
+		transform: scale(0.94);
+		opacity: 0.25;
+	}
+	100% {
+		transform: none;
+		opacity: 1;
+	}
+}
+
+.reflow .cell-btn {
+	animation: cell-cascade 0.34s var(--ease) both;
+}
+
+@media (min-width: 768px) {
+	.reflow .cell-btn {
+		animation-delay: calc(var(--ci, 0) * 14ms);
+	}
+}
+
+@media (max-width: 767px) {
+	.reflow .cell-btn {
+		animation-delay: calc(var(--cim, 0) * 14ms);
+	}
+}
+
+@media (prefers-reduced-motion: reduce) {
+	.reflow .cell-btn {
+		animation: none;
+	}
+}
+
 body {
 	font-family: var(--font-ui);
 	font-size: 1.2rem;

@@ -297,6 +297,26 @@
 		setImgLayout();
 	}
 
+	// cascading reshuffle when the column count changes: toggle .reflow on
+	// the grid wrapper; the wave itself is pure CSS (app.css)
+	let gridWrapEl = $state(null);
+	let reflowT = 0;
+	let firstReflow = true;
+	$effect(() => {
+		cols;
+		mobileCols;
+		if (firstReflow || !gridWrapEl) {
+			firstReflow = false;
+			return;
+		}
+		const el = gridWrapEl;
+		el.classList.remove('reflow');
+		void el.offsetWidth; // force a style flush so the animations restart
+		el.classList.add('reflow');
+		clearTimeout(reflowT);
+		reflowT = setTimeout(() => el.classList.remove('reflow'), 1500);
+	});
+
 	// --- lifecycle ---------------------------------------------------------
 	onMount(() => {
 		reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
@@ -435,6 +455,7 @@
 	<main>
 		<div
 			class="grid-wrap"
+			bind:this={gridWrapEl}
 			style={`--cols: repeat(${cols}, minmax(0, 1fr)); --mcols: repeat(${mobileCols}, minmax(0, 1fr))`}
 		>
 			{#each sources as s (s.id)}
@@ -447,7 +468,7 @@
 								<button
 									type="button"
 									class="cell-btn"
-									style={`aspect-ratio: ${m.w} / ${m.h}`}
+									style={`aspect-ratio: ${m.w} / ${m.h}; --ci: ${j % cols}; --cim: ${j % mobileCols}`}
 									aria-label={m.n}
 									data-i={gi}
 									onclick={() => open(gi)}

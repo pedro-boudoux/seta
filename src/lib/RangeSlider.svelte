@@ -7,29 +7,31 @@
 <div class="slider">
 	<input type="range" aria-label={label} {min} {max} {step} bind:value />
 	<div class="line" aria-hidden="true"></div>
-	<div class="knob" style={`left: ${pct}%`} aria-hidden="true">
-		<span class="knob-val">{value}</span>
-	</div>
+	<div class="knob" style={`left: ${pct}%`} aria-hidden="true"></div>
 </div>
 
 <style>
+	/* the slider itself is the full hit strip; the line is drawn through
+	   its middle. The native input fills the strip with no transforms —
+	   Chromium's range dragging misbehaves on transformed inputs. */
 	.slider {
 		position: relative;
 		width: 100%;
-		height: 1px;
+		height: 2.6rem;
 	}
 
 	.line {
 		position: absolute;
-		top: 0;
+		top: calc(50% - 0.5px);
 		left: 0;
 		width: 100%;
 		height: 1px;
 		background: var(--color-foreground);
+		pointer-events: none;
 	}
 
 	/* the handle: a dot that glides between the stepped positions,
-	   growing slightly when hovered or dragged */
+	   growing slightly while the strip is hovered or dragged */
 	.knob {
 		position: absolute;
 		top: 50%;
@@ -42,6 +44,7 @@
 		transition:
 			left 0.2s cubic-bezier(0.4, 0, 0.2, 1),
 			scale 0.2s var(--ease);
+		pointer-events: none;
 	}
 
 	.slider:hover .knob,
@@ -49,33 +52,14 @@
 		scale: 1.4;
 	}
 
-	/* the current value, shown above the handle while interacting */
-	.knob-val {
-		position: absolute;
-		bottom: 12px;
-		left: 50%;
-		translate: -50% 0;
-		font-size: 1.2rem;
-		line-height: 1;
-		color: var(--color-foreground);
-		opacity: 0;
-		transition: opacity 0.2s var(--ease);
-		pointer-events: none;
-	}
-
-	.slider:hover .knob-val,
-	.slider:has(input:active) .knob-val {
-		opacity: 0.6;
-	}
-
-	/* the native input stays invisible but provides a generous hit area */
+	/* the native input is invisible and fills the whole strip. Do NOT
+	   restyle ::-webkit-slider-thumb — appearance:none on the thumb breaks
+	   Chromium's native drag geometry; input-level opacity hides it anyway. */
 	input {
 		position: absolute;
-		top: 50%;
-		left: 0;
-		transform: translateY(-50%);
+		inset: 0;
 		width: 100%;
-		height: 3.6rem;
+		height: 100%;
 		margin: 0;
 		opacity: 0;
 		cursor: ew-resize;
@@ -83,11 +67,5 @@
 		-webkit-appearance: none;
 		background: transparent;
 		touch-action: pan-x;
-	}
-
-	input::-webkit-slider-thumb {
-		-webkit-appearance: none;
-		appearance: none;
-		opacity: 0;
 	}
 </style>

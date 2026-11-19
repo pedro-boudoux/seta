@@ -1,6 +1,7 @@
 <script>
 	import { fade } from 'svelte/transition';
 	import { onMount } from 'svelte';
+	import { SvelteSet } from 'svelte/reactivity';
 	import manifest from '#lib/data/manifest.json';
 	import RangeSlider from '#lib/RangeSlider.svelte';
 	import Lenis from 'lenis';
@@ -54,16 +55,20 @@
 
 	const fmt = (n) => n.toLocaleString('en-US');
 
-	function noteLoaded(e) {
-		e?.currentTarget?.classList.add('ld');
+	// marks whose grid image has loaded (or errored) — drives the fade-in
+	const loadedSet = new SvelteSet();
+
+	function markLoaded(gi) {
+		loadedSet.add(gi);
 		if (++loads >= LOADER_TARGET) loaderDone = true;
 	}
 
 	// images that finished loading before hydration never fire onload — count those too
 	function countInitialLoads() {
-		for (const img of document.querySelectorAll('.cell-btn img')) {
+		for (const btn of document.querySelectorAll('.cell-btn')) {
 			if (loads >= LOADER_TARGET) break;
-			if (img.complete) noteLoaded({ currentTarget: img });
+			const img = btn.querySelector('img');
+			if (img?.complete) markLoaded(Number(btn.dataset.i));
 		}
 	}
 
@@ -458,14 +463,15 @@
 								>
 									<img
 										src={markUrl(gi, 'smooth')}
+										class:ld={loadedSet.has(gi)}
 										width={m.w}
 										height={m.h}
 										alt={m.n}
 										loading={gi < EAGER ? 'eager' : 'lazy'}
 										fetchpriority={gi < 2 ? 'high' : 'auto'}
 										decoding="async"
-										onload={noteLoaded}
-										onerror={noteLoaded}
+										onload={() => markLoaded(gi)}
+										onerror={() => markLoaded(gi)}
 									/>
 								</button>
 							</li>

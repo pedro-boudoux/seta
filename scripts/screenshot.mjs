@@ -16,6 +16,17 @@ const OUT = path.join(root, '.qa');
 const shots = [
 	['01-desktop-grid.png', { width: 1440, height: 900 }, async (page) => {
 		await page.waitForTimeout(2800); // let the loader veil lift
+		// the grid must actually be visible — regression guard for the
+		// fade-in (a pruned `.ld` rule once left every image at opacity 0)
+		const vis = await page.evaluate(() => {
+			const img = document.querySelector('.cell-btn img');
+			const visible = [...document.querySelectorAll('.cell-btn img')].filter((i) =>
+				!i.className.includes('ld') ? false : getComputedStyle(i).opacity === '1'
+			).length;
+			return { first: img ? getComputedStyle(img).opacity : null, visible };
+		});
+		if (vis.first !== '1') errors.push(`01-desktop-grid: first image opacity ${vis.first} — grid invisible!`);
+		if (vis.visible < 6) errors.push(`01-desktop-grid: only ${vis.visible} visible images`);
 	}],
 	['02-desktop-scrolled.png', { width: 1440, height: 900 }, async (page) => {
 		await page.mouse.wheel(0, 2600);

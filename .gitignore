@@ -1,0 +1,12 @@
+# build output
+build/
+.svelte-kit/
+node_modules/
+dist/
+
+# qa screenshots
+.qa/
+
+# misc
+.DS_Store
+*.log

@@ -37,8 +37,8 @@ const shots = [
 		await page.locator('.cell-btn').nth(24).click();
 		await page.waitForTimeout(700);
 	}],
-	['04-desktop-detail-raw.png', { width: 1440, height: 900 }, async (page) => {
-		await page.getByRole('button', { name: 'Raw' }).click();
+	['04-desktop-detail-smooth.png', { width: 1440, height: 900 }, async (page) => {
+		await page.getByRole('button', { name: 'Smooth' }).click();
 		await page.waitForTimeout(700);
 	}],
 	['05-desktop-10cols.png', { width: 1440, height: 900 }, async (page) => {

@@ -154,7 +154,7 @@
 
 	function open(i) {
 		if (detail !== null) return;
-		variant = 'smooth';
+		variant = 'raw';
 		const g = fitRect(marks[i]);
 		const cellImg = document.querySelector(`[data-i="${i}"] img`);
 		const r = cellImg ? cellImg.getBoundingClientRect() : null;
@@ -474,7 +474,7 @@
 									onclick={() => open(gi)}
 								>
 									<img
-										src={markUrl(gi, 'smooth')}
+										src={markUrl(gi, 'raw')}
 										class:ld={loadedSet.has(gi)}
 										width={m.w}
 										height={m.h}

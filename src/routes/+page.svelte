@@ -30,6 +30,7 @@
 	let sentinel = $state(null);
 	let backBtn = $state(null);
 	let dImg = $state(null);
+	let dPeer = $state(null);
 	let closing = $state(false); // detail view animating back to the grid
 	let bgIn = $state(false); // detail backdrop faded in
 
@@ -108,9 +109,13 @@
 
 	function applyGeo() {
 		if (!dImg || detail === null) return;
-		const fade = 1 - Math.min(scrub / (window.innerHeight * 0.5), 1) * 0.5;
-		dImg.style.transform = `translate3d(${geo.p.x}px, ${geo.p.y + scrub}px, 0) scale(${geo.p.s})`;
+		const pageW = window.innerWidth;
+		const sp = Math.min(Math.abs(swipe) / (pageW * 0.3), 1);
+		const fade =
+			(1 - Math.min(scrub / (window.innerHeight * 0.5), 1) * 0.5) * (1 - sp * 0.3);
+		dImg.style.transform = `translate3d(${geo.p.x + swipe}px, ${geo.p.y + scrub}px, 0) scale(${geo.p.s})`;
 		dImg.style.opacity = fade;
+		applyPeer();
 	}
 
 	function detailLoop() {
@@ -122,6 +127,32 @@
 		scrubV += -scrub * 0.09;
 		scrubV *= 0.8;
 		scrub += scrubV;
+
+		// the swipe track follows the finger, springs when released
+		if (!swipeLive) {
+			swipeV += (swipeTg - swipe) * 0.12;
+			swipeV *= 0.8;
+			swipe += swipeV;
+		} else {
+			swipeV = 0;
+		}
+
+		// a committed swipe lands the peer centered — swap it in; the loop
+		// keeps running (stopping here would wedge geoRaf and kill all
+		// animation state)
+		if (swipeCommit && !swipeLive && Math.abs(swipeTg - swipe) < 3 && Math.abs(swipeV) < 3) {
+			finishSwipe();
+		} else if (
+			!swipeLive &&
+			!swipeCommit &&
+			swipeDir !== 0 &&
+			Math.abs(swipe) < 2 &&
+			Math.abs(swipeV) < 1
+		) {
+			// a cancelled swipe has retracted — hide the peer, caption returns
+			swipeDir = 0;
+			peerIdx = null;
+		}
 
 		let settled = true;
 		if (reduceMotion) {
@@ -145,7 +176,14 @@
 		}
 		applyGeo();
 
-		if (closing && settled && Math.abs(scrub) < 1 && Math.abs(scrubV) < 0.6) {
+		if (
+			closing &&
+			settled &&
+			Math.abs(scrub) < 1 &&
+			Math.abs(scrubV) < 0.6 &&
+			Math.abs(swipe) < 2 &&
+			Math.abs(swipeV) < 1
+		) {
 			finalizeClose();
 			return;
 		}
@@ -187,6 +225,13 @@
 		const i = detail;
 		detail = null;
 		closing = false;
+		swipe = 0;
+		swipeTg = 0;
+		swipeV = 0;
+		swipeCommit = false;
+		swipeLive = false;
+		swipeDir = 0;
+		peerIdx = null;
 		if (geoRaf) {
 			cancelAnimationFrame(geoRaf);
 			geoRaf = 0;
@@ -223,6 +268,137 @@
 		if (detail === null || closing) return;
 		scrub = Math.max(0, Math.min(scrub + e.deltaY, window.innerHeight * 0.5));
 		if (scrub > window.innerHeight * 0.22) close();
+	}
+
+	// --- touch swipe navigation (mobile detail) ----------------------------
+	let swipe = 0; // live horizontal track offset, follows the finger
+	let swipeTg = 0; // spring target when released
+	let swipeV = 0;
+	let swipeCommit = false;
+	let swipeLive = false;
+	let peerIdx = null; // mark sliding in from the edge
+	let swipeDir = $state(0); // 1 = next, -1 = previous, 0 = idle
+	let ptrId = null;
+	let ptrX = 0;
+	let ptrY = 0;
+	let ptrT = 0;
+	let lastDx = 0; // velocity sample: the most recent move's step delta
+	let prevDx = 0;
+	let lastDt = 16;
+
+	function layoutPeer() {
+		if (!dPeer || peerIdx === null) return;
+		const m = marks[peerIdx];
+		const base = fitRect(m);
+		dPeer.src = markUrl(peerIdx);
+		dPeer.setAttribute('width', m.w);
+		dPeer.setAttribute('height', m.h);
+		dPeer.style.width = `${base.w}px`;
+		dPeer.style.height = `${base.h}px`;
+	}
+
+	function applyPeer() {
+		if (!dPeer || detail === null || peerIdx === null || swipeDir === 0) {
+			if (dPeer) dPeer.style.opacity = '0';
+			return;
+		}
+		const base = fitRect(marks[peerIdx]);
+		const pageW = window.innerWidth;
+		const x = base.x + swipeDir * pageW + swipe;
+		const p = Math.min(Math.abs(swipe) / (pageW * 0.3), 1);
+		dPeer.style.transform = `translate3d(${x}px, ${base.y}px, 0)`;
+		dPeer.style.opacity = String(p);
+	}
+
+	// touch pointer events: the browser implicitly captures touch to the
+	// press target, so moves keep flowing to the overlay without breaking
+	// click-to-dismiss on the backdrop
+	function onPointerDown(e) {
+		if (e.pointerType !== 'touch' || detail === null || closing) return;
+		const hit = e.target.closest('button, a, input');
+		if (hit && !hit.classList.contains('d-back')) return; // still swipe from the backdrop
+		ptrId = e.pointerId;
+		ptrX = e.clientX;
+		ptrY = e.clientY;
+		ptrT = performance.now();
+		swipeLive = false;
+		lastDx = 0;
+		prevDx = 0;
+		lastDt = 16;
+	}
+
+	function onPointerMove(e) {
+		if (ptrId !== e.pointerId || detail === null || closing) return;
+		const dx = e.clientX - ptrX;
+		const dy = e.clientY - ptrY;
+		if (!swipeLive) {
+			if (Math.abs(dx) > 12 && Math.abs(dx) > Math.abs(dy) * 1.4) {
+				swipeLive = true;
+				swipeDir = dx < 0 ? 1 : -1; // swipe left = next
+				peerIdx = (detail + swipeDir + total) % total;
+				swipeTg = 0;
+				swipeV = 0;
+				prevDx = 0;
+				layoutPeer();
+				applyPeer();
+			} else return;
+		}
+		const now = performance.now();
+		lastDt = Math.max(1, now - ptrT);
+		ptrT = now;
+		lastDx = dx - prevDx; // this move's step, for fling detection
+		prevDx = dx;
+		swipe = dx;
+	}
+
+	function onPointerUp(e) {
+		if (ptrId !== e.pointerId) return;
+		ptrId = null;
+		if (!swipeLive) return;
+		swipeLive = false;
+		const pageW = window.innerWidth;
+		const v = Math.abs(lastDx) / lastDt; // px per ms — a fling commits too
+		if (Math.abs(swipe) > pageW * 0.18 || v > 0.5) {
+			swipeCommit = true;
+			swipeTg = -swipeDir * pageW;
+		} else {
+			swipeCommit = false;
+			swipeTg = 0;
+		}
+	}
+
+	function onPointerCancel(e) {
+		if (ptrId !== e.pointerId) return;
+		ptrId = null;
+		swipeLive = false;
+		swipeCommit = false;
+		swipeTg = 0;
+	}
+
+	// the committed swipe has come to rest with the peer centered — swap it in
+	function finishSwipe() {
+		const idx = peerIdx;
+		if (idx === null) {
+			// defensive: nothing to swap, just release the commit
+			swipeCommit = false;
+			swipe = 0;
+			swipeTg = 0;
+			swipeV = 0;
+			return;
+		}
+		const base = fitRect(marks[idx]);
+		geo.p = { x: base.x, y: base.y, s: 1 };
+		geo.v = { x: 0, y: 0, s: 0 };
+		geo.tg = { x: base.x, y: base.y, s: 1 };
+		swipe = 0;
+		swipeTg = 0;
+		swipeV = 0;
+		swipeCommit = false;
+		swipeDir = 0;
+		peerIdx = null;
+		detail = idx; // reactive: src, caption, counter, preloads
+		setImgLayout();
+		applyGeo();
 	}
 
 	// --- keyboard ----------------------------------------------------------
@@ -412,7 +588,11 @@
 		<div class="gradient" aria-hidden="true"></div>
 		<h1 class="name">Seta</h1>
 		<nav class="close-nav">
-			<button type="button" class="text-btn" onclick={close}>Close</button>
+			<button type="button" class="close-x" onclick={close} aria-label="Close">
+				<svg viewBox="0 0 14 14" fill="none" aria-hidden="true">
+					<path d="M1 1l12 12M13 1L1 13" stroke="currentColor" stroke-width="1" />
+				</svg>
+			</button>
 		</nav>
 		<div class="center-slot">
 			<div class="slider-row" class:show={detail === null} inert={detail !== null}>
@@ -496,7 +676,17 @@
 	</main>
 
 	{#if detail !== null && detailMark}
-		<div class="detail" role="dialog" aria-modal="true" aria-label={detailMark.n} onwheel={onWheel}>
+		<div
+			class="detail"
+			role="dialog"
+			aria-modal="true"
+			aria-label={detailMark.n}
+			onwheel={onWheel}
+			onpointerdown={onPointerDown}
+			onpointermove={onPointerMove}
+			onpointerup={onPointerUp}
+			onpointercancel={onPointerCancel}
+		>
 			<button
 				type="button"
 				class="d-back"
@@ -516,8 +706,13 @@
 				alt={detailMark.n}
 				draggable="false"
 			/>
+			<img bind:this={dPeer} class="d-img d-peer" alt="" aria-hidden="true" draggable="false" />
 			{#if dGeom}
-				<p class="d-source" class:show={bgIn && !closing} style={`left:${dGeom.x}px; top:${dGeom.y + dGeom.h + 14}px; width:${dGeom.w}px`}>
+				<p
+					class="d-source"
+					class:show={bgIn && !closing && swipeDir === 0}
+					style={`left:${dGeom.x}px; top:${dGeom.y + dGeom.h + 14}px; width:${dGeom.w}px`}
+				>
 					{detailMark.s.author} · {detailMark.s.title}{#if detailMark.s.year} · {detailMark.s.year}{/if}
 				</p>
 			{/if}
@@ -834,6 +1029,31 @@
 		position: fixed;
 		inset: 0;
 		z-index: 50;
+		/* the overlay owns its touch gestures: swipes stay swipes */
+		touch-action: none;
+	}
+
+	/* the X close button (mobile): a generous square hit area around a
+	   hairline cross */
+	.close-x {
+		display: grid;
+		place-items: center;
+		width: 34px;
+		height: 34px;
+		margin-right: -10px; /* align the glyph with the page padding */
+		opacity: 0.6;
+		transition: opacity 0.4s var(--ease);
+	}
+
+	.close-x:hover,
+	.close-x:active {
+		opacity: 1;
+	}
+
+	.close-x svg {
+		width: 14px;
+		height: 14px;
+		display: block;
 	}
 
 	.d-back {
@@ -857,9 +1077,20 @@
 		cursor: w-resize;
 	}
 
+	@media (max-width: 767px) {
+		.d-zone {
+			/* mobile navigates by swiping instead of edge taps */
+			display: none;
+		}
+	}
+
 	.d-next {
 		right: 0;
 		cursor: e-resize;
+	}
+
+	.d-peer {
+		opacity: 0;
 	}
 
 	.d-img {

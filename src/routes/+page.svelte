@@ -4,7 +4,6 @@
 	import { SvelteSet } from 'svelte/reactivity';
 	import manifest from '#lib/data/manifest.json';
 	import RangeSlider from '#lib/RangeSlider.svelte';
-	import Lenis from 'lenis';
 
 	const GITHUB_URL = 'https://github.com/pedro-boudoux';
 
@@ -234,8 +233,7 @@
 		else if (e.key === 'ArrowRight') next();
 	}
 
-	// --- smooth scrolling + velocity bend -----------------------------------
-	let lenis = null;
+	// --- velocity bend -----------------------------------
 	let mainRaf = 0;
 	let vel = 0;
 	let lastY = -1;
@@ -243,8 +241,7 @@
 	let bendItems = [];
 	let bendDirty = false;
 
-	function mainFrame(time) {
-		if (lenis) lenis.raf(time);
+	function mainFrame() {
 		bendFrame();
 		mainRaf = requestAnimationFrame(mainFrame);
 	}
@@ -313,9 +310,6 @@
 			}
 		} catch {}
 
-		if (!touchDevice && !reduceMotion) {
-			lenis = new Lenis({ lerp: 0.1 });
-		}
 		mainRaf = requestAnimationFrame(mainFrame);
 
 		const io = new IntersectionObserver(
@@ -340,7 +334,6 @@
 			io.disconnect();
 			window.removeEventListener('resize', onResize);
 			clearTimeout(t);
-			lenis?.destroy();
 		};
 	});
 
@@ -358,11 +351,9 @@
 		bendDirty = true;
 	});
 
-	// lock scroll (and lenis) while a mark is open
+	// lock page scroll while a mark is open
 	$effect(() => {
 		document.documentElement.classList.toggle('locked', detail !== null);
-		if (detail !== null) lenis?.stop();
-		else lenis?.start();
 	});
 
 	// detail view: size the image, start the spring loop, fade the backdrop in

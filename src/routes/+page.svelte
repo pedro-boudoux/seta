@@ -3,6 +3,7 @@
 	import { onMount } from 'svelte';
 	import manifest from '#lib/data/manifest.json';
 	import RangeSlider from '#lib/RangeSlider.svelte';
+	import Lenis from 'lenis';
 
 	const GITHUB_URL = 'https://github.com/pedro-boudoux';
 
@@ -28,8 +29,16 @@
 	let loads = 0;
 	let sentinel = $state(null);
 	let backBtn = $state(null);
+	let dImg = $state(null);
+	let closing = $state(false); // detail view animating back to the grid
+	let bgIn = $state(false); // detail backdrop faded in
 
 	const detailMark = $derived(detail === null ? null : marks[detail]);
+	const dGeom = $derived(detailMark ? fitRect(detailMark) : null);
+
+	// environment flags, read once on mount
+	let reduceMotion = false;
+	let touchDevice = false;
 
 	// --- helpers -----------------------------------------------------------
 	const markUrl = (i, v = variant) => {
@@ -45,7 +54,8 @@
 
 	const fmt = (n) => n.toLocaleString('en-US');
 
-	function noteLoaded() {
+	function noteLoaded(e) {
+		e?.currentTarget?.classList.add('ld');
 		if (++loads >= LOADER_TARGET) loaderDone = true;
 	}
 
@@ -53,29 +63,162 @@
 	function countInitialLoads() {
 		for (const img of document.querySelectorAll('.cell-btn img')) {
 			if (loads >= LOADER_TARGET) break;
-			if (img.complete) noteLoaded();
+			if (img.complete) noteLoaded({ currentTarget: img });
 		}
 	}
 
+	// target rect of the expanded mark: fit into the viewport like the reference
+	function fitRect(m) {
+		const vw = window.innerWidth;
+		const vh = window.innerHeight;
+		const maxW = vw < 768 ? vw * 0.82 : vw * 0.68;
+		const maxH = vh * 0.68;
+		const ar = m.w / m.h;
+		let w = maxW;
+		let h = w / ar;
+		if (h > maxH) {
+			h = maxH;
+			w = h * ar;
+		}
+		return { x: (vw - w) / 2, y: (vh - h) / 2, w, h };
+	}
+
+	// --- detail view: spring-driven FLIP zoom -------------------------------
+	const geo = {
+		p: { x: 0, y: 0, s: 1 }, // position: translate + scale, relative to base size
+		tg: { x: 0, y: 0, s: 1 },
+		v: { x: 0, y: 0, s: 0 }
+	};
+	let scrub = 0; // wheel-driven downward offset while a mark is open
+	let scrubV = 0;
+	let geoRaf = 0;
+	let lastGeom = null; // base rect the current scale is relative to
+
+	function setImgLayout() {
+		if (!dImg || detail === null) return;
+		const g = fitRect(marks[detail]);
+		lastGeom = g;
+		dImg.style.width = `${g.w}px`;
+		dImg.style.height = `${g.h}px`;
+	}
+
+	function applyGeo() {
+		if (!dImg || detail === null) return;
+		const fade = 1 - Math.min(scrub / (window.innerHeight * 0.5), 1) * 0.5;
+		dImg.style.transform = `translate3d(${geo.p.x}px, ${geo.p.y + scrub}px, 0) scale(${geo.p.s})`;
+		dImg.style.opacity = fade;
+	}
+
+	function detailLoop() {
+		if (detail === null) {
+			geoRaf = 0;
+			return;
+		}
+		// scrub springs back toward zero once the wheel rests
+		scrubV += -scrub * 0.09;
+		scrubV *= 0.8;
+		scrub += scrubV;
+
+		let settled = true;
+		if (reduceMotion) {
+			scrub = 0;
+			scrubV = 0;
+			for (const k of ['x', 'y', 's']) geo.p[k] = geo.tg[k];
+			geo.v = { x: 0, y: 0, s: 0 };
+		} else {
+			for (const k of ['x', 'y', 's']) {
+				const d = geo.tg[k] - geo.p[k];
+				geo.v[k] = (geo.v[k] + d * 0.11) * 0.8;
+				const eps = k === 's' ? 0.002 : 0.5;
+				if (Math.abs(d) > eps || Math.abs(geo.v[k]) > eps) {
+					geo.p[k] += geo.v[k];
+					settled = false;
+				} else {
+					geo.p[k] = geo.tg[k];
+					geo.v[k] = 0;
+				}
+			}
+		}
+		applyGeo();
+
+		if (closing && settled && Math.abs(scrub) < 1 && Math.abs(scrubV) < 0.6) {
+			finalizeClose();
+			return;
+		}
+		geoRaf = requestAnimationFrame(detailLoop);
+	}
+
 	function open(i) {
+		if (detail !== null) return;
 		variant = 'smooth';
+		const g = fitRect(marks[i]);
+		const cellImg = document.querySelector(`[data-i="${i}"] img`);
+		const r = cellImg ? cellImg.getBoundingClientRect() : null;
+		closing = false;
+		bgIn = false;
+		scrub = 0;
+		scrubV = 0;
+		if (r) {
+			geo.p = { x: r.x, y: r.y, s: r.width / g.w };
+			geo.v = { x: 0, y: 0, s: 0 };
+		} else {
+			geo.p = { x: g.x, y: g.y, s: 1 };
+			geo.v = { x: 0, y: 0, s: 0 };
+		}
+		geo.tg = { x: g.x, y: g.y, s: 1 };
 		detail = i;
 	}
 
 	function close() {
+		if (detail === null || closing) return;
+		closing = true;
+		bgIn = false;
+		const g = lastGeom ?? fitRect(marks[detail]);
+		const cellImg = document.querySelector(`[data-i="${detail}"] img`);
+		const r = cellImg?.getBoundingClientRect();
+		geo.tg = r ? { x: r.x, y: r.y, s: r.width / g.w } : { ...geo.p };
+	}
+
+	function finalizeClose() {
 		const i = detail;
 		detail = null;
+		closing = false;
+		if (geoRaf) {
+			cancelAnimationFrame(geoRaf);
+			geoRaf = 0;
+		}
 		if (i !== null) {
 			queueMicrotask(() => document.querySelector(`[data-i="${i}"]`)?.focus());
 		}
 	}
 
+	// move between marks: keep the on-screen rect continuous, spring the rest
+	function goTo(newIdx) {
+		if (closing || detail === null) return;
+		const oldG = lastGeom ?? fitRect(marks[detail]);
+		detail = newIdx;
+		const g = fitRect(marks[detail]);
+		const f = oldG.w / g.w;
+		geo.p.s *= f;
+		geo.v.s *= f;
+		geo.tg = { x: g.x, y: g.y, s: 1 };
+		setImgLayout();
+	}
+
 	function prev() {
-		detail = (detail - 1 + total) % total;
+		if (detail !== null) goTo((detail - 1 + total) % total);
 	}
 
 	function next() {
-		detail = (detail + 1) % total;
+		if (detail !== null) goTo((detail + 1) % total);
+	}
+
+	// scroll down to dismiss, like the reference site: the mark follows the
+	// wheel, springs back if released, and closes past a threshold
+	function onWheel(e) {
+		if (detail === null || closing) return;
+		scrub = Math.max(0, Math.min(scrub + e.deltaY, window.innerHeight * 0.5));
+		if (scrub > window.innerHeight * 0.22) close();
 	}
 
 	// --- keyboard ----------------------------------------------------------
@@ -86,18 +229,77 @@
 		else if (e.key === 'ArrowRight') next();
 	}
 
-	// scroll down anywhere to go back to the grid, like the reference site
-	let wheelAcc = 0;
-	let wheelT;
-	function onWheel(e) {
-		wheelAcc += e.deltaY;
-		clearTimeout(wheelT);
-		wheelT = setTimeout(() => (wheelAcc = 0), 250);
-		if (wheelAcc > 120) close();
+	// --- smooth scrolling + velocity bend -----------------------------------
+	let lenis = null;
+	let mainRaf = 0;
+	let vel = 0;
+	let lastY = -1;
+	let bendActive = false;
+	let bendItems = [];
+	let bendDirty = false;
+
+	function mainFrame(time) {
+		if (lenis) lenis.raf(time);
+		bendFrame();
+		mainRaf = requestAnimationFrame(mainFrame);
+	}
+
+	function buildBend() {
+		bendItems = [...document.querySelectorAll('.cell')].map((el) => ({
+			el,
+			top: el.offsetTop,
+			bottom: el.offsetTop + el.offsetHeight
+		}));
+		bendDirty = false;
+	}
+
+	function clearBend() {
+		for (const it of bendItems) it.el.style.transform = '';
+		bendItems = [];
+		bendActive = false;
+	}
+
+	function bendFrame() {
+		if (reduceMotion || touchDevice) return;
+		const y = window.scrollY;
+		if (lastY < 0) lastY = y;
+		vel = vel * 0.86 + (y - lastY) * 0.14;
+		lastY = y;
+		if (detail !== null) {
+			if (bendActive) clearBend();
+			return;
+		}
+		const k = Math.max(-2.4, Math.min(2.4, vel * 0.05));
+		if (Math.abs(k) > 0.1) {
+			if (!bendActive || bendDirty) buildBend();
+			const top = y - window.innerHeight * 0.25;
+			const bottom = y + window.innerHeight * 1.25;
+			for (const it of bendItems) {
+				if (it.bottom >= top && it.top <= bottom) {
+					it.el.style.transform = `skewY(${k}deg) scale(${1 - Math.abs(k) * 0.005})`;
+				}
+			}
+			bendActive = true;
+		} else if (bendActive) {
+			clearBend();
+		}
+	}
+
+	function onResize() {
+		if (detail === null || !lastGeom) return;
+		const g = fitRect(marks[detail]);
+		const f = lastGeom.w / g.w;
+		geo.p.s *= f;
+		geo.v.s *= f;
+		geo.tg = { x: g.x, y: g.y, s: 1 };
+		setImgLayout();
 	}
 
 	// --- lifecycle ---------------------------------------------------------
 	onMount(() => {
+		reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+		touchDevice = window.matchMedia('(hover: none) and (pointer: coarse)').matches;
+
 		try {
 			const saved = JSON.parse(localStorage.getItem('seta:cols') || 'null');
 			if (saved) {
@@ -105,6 +307,11 @@
 				if (Number.isInteger(saved.m)) mobileCols = saved.m;
 			}
 		} catch {}
+
+		if (!touchDevice && !reduceMotion) {
+			lenis = new Lenis({ lerp: 0.1 });
+		}
+		mainRaf = requestAnimationFrame(mainFrame);
 
 		const io = new IntersectionObserver(
 			(entries) => {
@@ -119,10 +326,16 @@
 
 		countInitialLoads();
 
+		window.addEventListener('resize', onResize);
+
 		const t = setTimeout(() => (loaderDone = true), 3000);
 		return () => {
+			cancelAnimationFrame(mainRaf);
+			if (geoRaf) cancelAnimationFrame(geoRaf);
 			io.disconnect();
+			window.removeEventListener('resize', onResize);
 			clearTimeout(t);
+			lenis?.destroy();
 		};
 	});
 
@@ -132,14 +345,33 @@
 		} catch {}
 	});
 
-	// lock page scroll while a mark is open
+	// rebuild the bend cache when the grid changes shape
 	$effect(() => {
-		document.documentElement.classList.toggle('locked', detail !== null);
+		rendered;
+		cols;
+		mobileCols;
+		bendDirty = true;
 	});
 
-	// move focus into the dialog on open
+	// lock scroll (and lenis) while a mark is open
 	$effect(() => {
-		if (detail !== null) backBtn?.focus();
+		document.documentElement.classList.toggle('locked', detail !== null);
+		if (detail !== null) lenis?.stop();
+		else lenis?.start();
+	});
+
+	// detail view: size the image, start the spring loop, fade the backdrop in
+	$effect(() => {
+		if (detail === null || !dImg) return;
+		setImgLayout();
+		applyGeo();
+		if (!geoRaf) geoRaf = requestAnimationFrame(detailLoop);
+		requestAnimationFrame(() => (bgIn = true));
+	});
+
+	// move focus into the dialog while it is open
+	$effect(() => {
+		if (detail !== null && !closing) backBtn?.focus();
 	});
 
 	// preload neighbours while browsing
@@ -195,7 +427,7 @@
 		</div>
 		<div class="right-slot">
 			<a class="text-btn credit" href={GITHUB_URL} target="_blank" rel="noopener noreferrer">
-				put together by <span class="u">pedro boudoux</span>
+				compiled by <span class="u">pedro boudoux</span>
 			</a>
 			<div class="counter" class:show={detail !== null}>
 				<span class="cur">{fmt(detail === null ? 1 : detail + 1)}</span>
@@ -212,10 +444,6 @@
 			{#each sources as s (s.id)}
 				{@const visible = Math.max(0, Math.min(s.marks.length, rendered - s.start))}
 				<section class="source">
-					<h2 class="source-label">
-						{s.author} — {s.title}
-						<span class="label-count">{fmt(s.marks.length)} marks</span>
-					</h2>
 					<ul class="grid">
 						{#each s.marks.slice(0, visible) as m, j (s.id + ':' + (m.g || '') + ':' + m.n)}
 							{@const gi = s.start + j}
@@ -250,27 +478,31 @@
 	</main>
 
 	{#if detail !== null && detailMark}
-		<div
-			class="detail"
-			role="dialog"
-			aria-modal="true"
-			aria-label={detailMark.n}
-			onwheel={onWheel}
-			transition:fade={{ duration: 200 }}
-		>
-			<button type="button" class="d-back" bind:this={backBtn} aria-label="Back to grid" onclick={close}></button>
+		<div class="detail" role="dialog" aria-modal="true" aria-label={detailMark.n} onwheel={onWheel}>
+			<button
+				type="button"
+				class="d-back"
+				class:bg-in={bgIn}
+				bind:this={backBtn}
+				aria-label="Back to grid"
+				onclick={close}
+			></button>
 			<button type="button" class="d-zone d-prev" aria-label="Previous mark" onclick={prev}></button>
 			<button type="button" class="d-zone d-next" aria-label="Next mark" onclick={next}></button>
-			{#key `${detail}-${variant}`}
-				<img
-					class="d-img"
-					src={markUrl(detail)}
-					width={detailMark.w}
-					height={detailMark.h}
-					alt={detailMark.n}
-					draggable="false"
-				/>
-			{/key}
+			<img
+				bind:this={dImg}
+				class="d-img"
+				src={markUrl(detail)}
+				width={detailMark.w}
+				height={detailMark.h}
+				alt={detailMark.n}
+				draggable="false"
+			/>
+			{#if dGeom}
+				<p class="d-source" class:show={bgIn && !closing} style={`left:${dGeom.x}px; top:${dGeom.y + dGeom.h + 14}px; width:${dGeom.w}px`}>
+					{detailMark.s.author} · {detailMark.s.title}{#if detailMark.s.year} · {detailMark.s.year}{/if}
+				</p>
+			{/if}
 		</div>
 	{/if}
 </div>
@@ -320,7 +552,7 @@
 		inset-inline: 0;
 		bottom: 0;
 		height: 60px;
-		background: linear-gradient(to bottom, transparent, rgb(253 253 253 / 0.6));
+		background: linear-gradient(to bottom, transparent, rgb(253 253 253 / 0.85));
 		pointer-events: none;
 	}
 
@@ -505,19 +737,8 @@
 		}
 	}
 
-	.source-label {
-		margin: 0 0 var(--spacing-grid-x);
-		padding-top: calc(var(--spacing-page-y) * 2);
-		font-weight: 400;
-	}
-
-	.source:first-child .source-label {
-		padding-top: 0;
-	}
-
-	.label-count {
-		color: rgb(22 22 29 / 0.6);
-		margin-left: 2ch;
+	.source:not(:first-child) {
+		margin-top: calc(var(--spacing-page-y) * 2);
 	}
 
 	.grid {
@@ -551,6 +772,12 @@
 	.cell-btn img {
 		width: 100%;
 		height: 100%;
+		opacity: 0;
+		transition: opacity 0.4s var(--ease);
+	}
+
+	.cell-btn img.ld {
+		opacity: 1;
 	}
 
 	/* subtle per-cell affordance on touch devices */
@@ -569,8 +796,6 @@
 		position: fixed;
 		inset: 0;
 		z-index: 50;
-		display: grid;
-		place-items: center;
 	}
 
 	.d-back {
@@ -578,6 +803,12 @@
 		inset: 0;
 		background: var(--color-background);
 		cursor: s-resize;
+		opacity: 0;
+		transition: opacity 0.4s var(--ease);
+	}
+
+	.d-back.bg-in {
+		opacity: 1;
 	}
 
 	.d-zone {
@@ -594,18 +825,26 @@
 	}
 
 	.d-img {
-		position: relative;
+		position: fixed;
+		left: 0;
+		top: 0;
 		z-index: 1;
-		max-width: 82vw;
-		max-height: 68vh;
-		max-height: 68lvh;
-		object-fit: contain;
+		transform-origin: 0 0;
+		pointer-events: none;
+		will-change: transform;
+	}
+
+	.d-source {
+		position: fixed;
+		z-index: 1;
+		color: rgb(22 22 29 / 0.6);
+		text-align: center;
+		opacity: 0;
+		transition: opacity 0.4s var(--ease);
 		pointer-events: none;
 	}
 
-	@media (min-width: 768px) {
-		.d-img {
-			max-width: 68vw;
-		}
+	.d-source.show {
+		opacity: 1;
 	}
 </style>

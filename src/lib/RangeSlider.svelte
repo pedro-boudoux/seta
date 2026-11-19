@@ -54,7 +54,9 @@
 
 	/* the native input is invisible and fills the whole strip. Do NOT
 	   restyle ::-webkit-slider-thumb — appearance:none on the thumb breaks
-	   Chromium's native drag geometry; input-level opacity hides it anyway. */
+	   Chromium's native drag geometry; input-level opacity hides it anyway.
+	   touch-action: none keeps touch swipes on the slider for the slider —
+	   pan-x let mobile browsers claim them as scroll gestures. */
 	input {
 		position: absolute;
 		inset: 0;
@@ -66,6 +68,6 @@
 		appearance: none;
 		-webkit-appearance: none;
 		background: transparent;
-		touch-action: pan-x;
+		touch-action: none;
 	}
 </style>

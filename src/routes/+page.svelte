@@ -607,13 +607,19 @@
 		align-items: center;
 		width: 100%;
 		opacity: 0;
-		pointer-events: none;
-		transition: opacity 0.4s var(--ease);
+		visibility: hidden;
+		/* hidden controls must not intercept pointers; visibility flips
+		   after the fade-out finishes */
+		transition:
+			opacity 0.4s var(--ease),
+			visibility 0s 0.4s var(--ease);
 	}
 
 	.slider-row.show,
 	.compare.show {
 		opacity: 1;
+		visibility: visible;
+		transition: opacity 0.4s var(--ease);
 		pointer-events: auto;
 	}
 
@@ -732,6 +738,20 @@
 		.header {
 			top: 0;
 			grid-template-rows: auto minmax(0, 1fr) auto;
+		}
+
+		.name {
+			grid-column: 1;
+		}
+
+		/* the credit needs more than one column to stay on a single line */
+		.right-slot {
+			grid-column: 2 / span 3;
+		}
+
+		/* detail mode: credit hidden, counter drops to the bottom */
+		.app.detail-mode .right-slot {
+			justify-content: flex-end;
 		}
 
 		.app.detail-mode .close-nav {

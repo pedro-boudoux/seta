@@ -3,11 +3,11 @@
 A minimal gallery of vectorized trademarks & symbols, traced from classic
 design reference books — free to browse, compare and download.
 
-Currently holding **2,870 marks** from two books, each traced twice:
+Currently holding **3,041 marks** from two books, each traced twice:
 
 - Yasaburo Kuwayama — *Trade Marks & Symbols, Vol. 2 — Symbolical Designs*
   (1973): 1,502 marks (plates, editorial, cover)
-- Alan Cooper — *World of Logotypes*: 1,368 marks
+- Alan Cooper — *World of Logotypes*: 1,539 marks
 
 - **raw** — maximally faithful to the scan
 - **smooth** — same geometry, gently smoothed curves

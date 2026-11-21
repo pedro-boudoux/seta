@@ -896,6 +896,16 @@
 			grid-template-columns: repeat(6, minmax(0, 1fr));
 		}
 
+		/* the close X pins to the viewport's top-right corner while a
+		   mark is open, aligned with the page padding */
+		.app.detail-mode .close-nav {
+			display: flex;
+			position: fixed;
+			top: var(--spacing-page-y);
+			right: var(--spacing-page-x);
+			pointer-events: auto;
+		}
+
 		.gradient {
 			height: 90px;
 		}
